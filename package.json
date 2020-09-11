@@ -1,0 +1,14 @@
+{
+  "name": "mp2",
+  "version": "0.0.1",
+  "description": "machine project 2 for intro to databases 2020",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Hubert Yuan",
+  "license": "ISC",
+  "dependencies": {
+    "pg": "^8.3.3"
+  }
+}
