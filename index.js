@@ -25,12 +25,31 @@ class DB {
         return this.client.query("SELECT COUNT(StudentID) FROM Registration WHERE CourseID = $1 GROUP BY CourseID", [courseId]);
     }
     async studentSatisfiesRequirements(studentId, courseId) {
-
+        function exists(predicate) {
+            return `(SELECT xpath_exists('/Req/${predicate}/text()', Requirement) FROM Course WHERE CourseId = $2)`;
+        }
+        function fetch(predicate) {
+            return `( SELECT CAST(UNNEST(xpath('/Req/${predicate}/text()', Requirement)) AS TEXT) AS Reqs FROM Course WHERE CourseId = $2)`;
+        }
+        const coursesTaken = "(SELECT CourseID FROM Registration WHERE StudentID = $1 AND Grade >= 60)";
+        const cond1 = `(${exists("PrerequisiteCourse")} = False OR NOT EXISTS (SELECT * FROM ${fetch("PrerequisiteCourse")} AS X WHERE CAST(Reqs AS INT) NOT IN ${coursesTaken} ))`;
+        const cond2 = `(${exists("Dept")} = False OR EXISTS (SELECT * FROM ${fetch("Dept")} AS X, Student WHERE ID = $1 AND Dept = Reqs ))`;
+        return this.client.query(`SELECT ${cond1} AND ${cond2} AS MeetsRequirements`, [studentId, courseId]);
     }
     async registerToCourse(studentId, courseId) {
+        function exists(predicate) {
+            return `(SELECT xpath_exists('/Req/${predicate}/text()', Requirement) FROM Course WHERE CourseId = $2)`;
+        }
+        function fetch(predicate) {
+            return `( SELECT CAST(UNNEST(xpath('/Req/${predicate}/text()', Requirement)) AS TEXT) AS Reqs FROM Course WHERE CourseId = $2)`;
+        }
+        const coursesTaken = "(SELECT CourseID FROM Registration WHERE StudentID = $1 AND Grade >= 60)";
+        const cond1 = `(${exists("PrerequisiteCourse")} = False OR NOT EXISTS (SELECT * FROM ${fetch("PrerequisiteCourse")} AS X WHERE CAST(Reqs AS INT) NOT IN ${coursesTaken} ))`;
+        const cond2 = `(${exists("Dept")} = False OR EXISTS (SELECT * FROM ${fetch("Dept")} AS X, Student WHERE Name = $1 AND Dept = Reqs ))`;
+
         await this.client.query("BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE");
-        await this.client.query("INSERT INTO Registration(StudentID, CourseID) SELECT $1, $2 FROM Course WHERE CourseID = $2 AND RemainCapacity > 0", [studentId, courseId]);
-        await this.client.query("UPDATE Course SET RemainCapacity = RemainCapacity - 1 WHERE CourseID = $1 AND RemainCapacity > 0", [courseId]);
+        await this.client.query(`INSERT INTO Registration(StudentID, CourseID) SELECT $1, $2 FROM Course WHERE CourseID = $2 AND RemainCapacity > 0 AND ${cond1} AND ${cond2}`, [studentId, courseId]);
+        await this.client.query(`UPDATE Course SET RemainCapacity = RemainCapacity - 1 WHERE CourseID = $2 AND RemainCapacity > 0 AND ${cond1} AND ${cond2}`, [studentId, courseId]);
         return this.client.query("COMMIT");
     }
     async unregisterFromCourse(studentId, courseId) {
@@ -51,15 +70,15 @@ class DB {
         return this.client.query("SELECT CourseID, Grade FROM Registration WHERE StudentID = $1 AND Grade < 60", [studentId]);
     }
     async updateGrade(studentId, courseId, grade) {
-        return this.client.query("UPDATE Registration SET Grade = $3 WHERE StudentId = $1 AND CourseId = $2");
+        return this.client.query("UPDATE Registration SET Grade = $3 WHERE StudentId = $1 AND CourseId = $2", [studentId, courseId, grade]);
     }
     async computeGPA(studentID) {
         //simplifying assumption: gpa scales linearly from [60, 100] -> [1, 4].
         //for discrete GPA we can use SELECT AVG(CASE WHEN Grade >= 90 THEN 4 WHEN Grade >= 80 THEN 3 WHEN Grade >= 70 THEN 2 ...
-        return this.client.query("SELECT AVG((Grade-60)/40*3+1) FROM Registration WHERE StudentID = $1 AND Grade IS NOT NULL");
+        return this.client.query("SELECT AVG((Grade-60)/40*3+1) FROM Registration WHERE StudentID = $1 AND Grade IS NOT NULL", [studentID]);
     }
     async computeCourseGradeAverage(courseId) {
-        return this.client.query("SELECT AVG(Grade) FROM Registration WHERE CourseID = $1 AND Grade IS NOT NULL");
+        return this.client.query("SELECT AVG(Grade) FROM Registration WHERE CourseID = $1 AND Grade IS NOT NULL", [courseId]);
     }
     async close() {
         return this.client.end();
